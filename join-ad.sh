@@ -4,6 +4,9 @@
 # --- Configuration ---
 LOG_FILE="/var/log/join-ad.log" # Log file for error and output logging
 
+# Create the log file if it doesn't exist
+touch "$LOG_FILE"
+
 # --- Functions ---
 
 # Function to log messages and print to console
@@ -164,13 +167,16 @@ if ! realm join -U "$ADMIN_USER" "$DOMAIN_NAME" <<< "$ADMIN_PASSWORD"; then
         log_and_echo "Error: Domain join failed due to incorrect credentials (exit code $JOIN_EXIT_CODE)."
     elif [ $JOIN_EXIT_CODE -eq 6 ]; then
         log_and_echo "Error: Domain join failed due to network issues (exit code $JOIN_EXIT_CODE)."
+    elif [ $JOIN_EXIT_CODE -eq 11 ]; then
+        log_and_echo "Error: Domain join failed. The machine is already a member of a domain. (exit code $JOIN_EXIT_CODE)."
     else
-        log_and_echo "Error: Domain join failed (exit code $JOIN_EXIT_CODE)."
+        log_and_echo "Error: Domain join failed (exit code $JOIN_EXIT_CODE). Please check the log file for details."
     fi
     cleanup_and_exit
 fi
 DOMAIN_JOIN_SUCCESS=true # Track if domain join is successful
 log_and_echo "Finished: Joining the domain."
+
 
 # --- Configure PAM for Automatic Home Directory Creation ---
 log_and_echo "Starting: Configuring PAM..."

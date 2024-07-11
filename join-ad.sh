@@ -178,6 +178,22 @@ DOMAIN_JOIN_SUCCESS=true # Track if domain join is successful
 log_and_echo "Finished: Joining the domain."
 
 
+# --- Configure Time Synchronization ---
+echo "Starting: Configuring time synchronization..."
+check_and_execute "timedatectl set-ntp true" "Enabling NTP"
+
+if ! DOMAIN_CONTROLLER_IP=$(echo "$DOMAIN_CONTROLLERS" | awk '{print $1}'); then
+    echo "Error: Could not determine domain controller IP. Skipping time synchronization."
+else
+    if ! ntpdate -u "$DOMAIN_CONTROLLER_IP"; then
+        echo "Error: Failed to synchronize time with domain controller (exit code $?)."
+    fi
+fi
+
+echo "Finished: Configuring time synchronization."
+
+
+
 # --- Configure PAM for Automatic Home Directory Creation ---
 log_and_echo "Starting: Configuring PAM..."
 check_and_execute "grep -q 'pam_mkhomedir.so' /etc/pam.d/common-session" "Configuring PAM for automatic home directory creation..."
@@ -273,6 +289,13 @@ if realm list | grep -q "$DOMAIN_NAME"; then
     echo "- Successfully joined domain $DOMAIN_NAME"
 else
     echo "- Failed to join domain $DOMAIN_NAME"
+fi
+
+echo "\nTime Synchronization:"
+if timedatectl show | grep -q "NTP enabled: yes"; then
+    echo "- NTP enabled."
+else
+    echo "- NTP not enabled."
 fi
 
 echo "\nPAM Configuration:"

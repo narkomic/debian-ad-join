@@ -150,7 +150,10 @@ if grep -q "iface $DEFAULT_INTERFACE inet static" /etc/network/interfaces; then
             if validate_netmask "$NETMASK"; then break; fi
             echo "Invalid subnet mask. Please try again."
         done
-
+        
+		# Inform the user about the connection loss BEFORE restarting the network
+        echo "Static IP configured. You will lose connection and need to reconnect."
+		
         # Validate each DNS server individually
         while true; do
             read -p "Enter new DNS Servers (comma-separated): " DNS_SERVERS
@@ -164,10 +167,7 @@ if grep -q "iface $DEFAULT_INTERFACE inet static" /etc/network/interfaces; then
                 fi
             done
             if $all_valid; then break; fi # Exit the outer loop if all DNS servers are valid
-        done
-
-        # Inform the user about the connection loss BEFORE restarting the network
-        echo "Static IP configured. You will lose connection and need to reconnect." 
+        done 
 
         # Basic IP conflict check (ping the IP address)
         if ping -c 1 -W 1 "$IP_ADDRESS" >/dev/null; then
@@ -181,7 +181,12 @@ if grep -q "iface $DEFAULT_INTERFACE inet static" /etc/network/interfaces; then
         ip route add default via "$GATEWAY"
 
         # Update DNS servers in /etc/resolv.conf
-        echo "nameserver $DNS_SERVERS" > /etc/resolv.conf
+echo "domain $DOMAIN_NAME" > /etc/resolv.conf  # Set domain domain
+echo "search $DOMAIN_NAME" > /etc/resolv.conf  # Set search domain
+# Split DNS_SERVERS into an array, handling both comma and space separators
+for DNS in "${DNS_ARRAY[@]}"; do
+    echo "nameserver $DNS" >> /etc/resolv.conf  # Add each DNS server on a new line
+done
 
         # Update /etc/network/interfaces (replace existing configuration)
         sed -i "/iface $DEFAULT_INTERFACE inet.*/c\\
@@ -263,11 +268,19 @@ if [ -n "$EXISTING_DOMAIN" ] && [ -n "$EXISTING_SEARCH" ]; then
     done
 fi
 
+# Split DNS_SERVERS into an array
+IFS=',' read -ra DNS_ARRAY <<< "$DNS_SERVERS"
+
 # Write to /etc/resolv.conf
 cat <<EOF > /etc/resolv.conf
+domain $DOMAIN_NAME
 search $DOMAIN_NAME
-$(echo "$DNS_SERVERS" | awk '{print "nameserver " $1}')
 EOF
+
+# Add each nameserver on a separate line
+for DNS in "${DNS_ARRAY[@]}"; do
+    echo "nameserver $DNS" >> /etc/resolv.conf
+done
 
 # Configure static IP (using 'ip' command and updating /etc/network/interfaces)
 ip addr flush dev "$DEFAULT_INTERFACE"

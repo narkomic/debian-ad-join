@@ -231,38 +231,64 @@ else
             if $all_valid; then break; fi # Exit the outer loop if all DNS servers are valid
         done
 
-        # Basic IP conflict check (ping the IP address)
-        while ping -c 1 -W 1 "$IP_ADDRESS" >/dev/null; do
-            echo "Error: IP address $IP_ADDRESS seems to be in use. Please try again."
-            read -p "Enter new IP address: " IP_ADDRESS
-        done
-
-        # Configure static IP (using 'ip' command instead of nmcli)
-        ip addr flush dev "$DEFAULT_INTERFACE"
-        ip addr add "$IP_ADDRESS/$NETMASK" dev "$DEFAULT_INTERFACE"
-        ip route add default via "$GATEWAY"
-
-        # Update DNS servers in /etc/resolv.conf
-echo "search $DOMAIN_NAME" > /etc/resolv.conf # Set search domain
-for DNS in $(echo $DNS_SERVERS | sed 's/,/ /g'); do # Loop over DNS servers
-    echo "nameserver $DNS" >> /etc/resolv.conf # Add each DNS server on a new line
+# Basic IP conflict check (ping the IP address)
+while ping -c 1 -W 1 "$IP_ADDRESS" >/dev/null; do
+    echo "Error: IP address $IP_ADDRESS seems to be in use. Please try again."
+    read -p "Enter new IP address: " IP_ADDRESS
 done
 
-        #Update /etc/network/interfaces (replace existing configuration)
-        sed -i "/iface $DEFAULT_INTERFACE inet.*/c\\
-		iface $DEFAULT_INTERFACE inet static\\
-		address $IP_ADDRESS\\
-		netmask $NETMASK\\
-		gateway $GATEWAY\\
-		dns-nameservers $(echo $DNS_SERVERS | sed 's/,/ /g')" /etc/network/interfaces
+# Update DNS servers in /etc/resolv.conf
+# Check if domain and search settings already exist in resolv.conf
+EXISTING_DOMAIN=$(awk '/^domain/ {print $2}' /etc/resolv.conf)
+EXISTING_SEARCH=$(awk '/^search/ {print $2}' /etc/resolv.conf)
 
-        # Inform the user about the connection loss BEFORE restarting the network
-        echo "Static IP configured. You will lose connection and need to reconnect." 
+if [ -n "$EXISTING_DOMAIN" ] && [ -n "$EXISTING_SEARCH" ]; then
+    log_and_echo "Existing domain and search settings found in /etc/resolv.conf:"
+    log_and_echo "- domain $EXISTING_DOMAIN"
+    log_and_echo "- search $EXISTING_SEARCH"
 
-        echo "Restarting networking service to apply changes..."
-        systemctl restart networking
+    while true; do
+        read -p "Is this the correct domain you want to join ($EXISTING_DOMAIN)? (y/n): " confirm_domain
+        if [[ $confirm_domain =~ ^[Yy] ]]; then
+            DOMAIN_NAME="$EXISTING_DOMAIN"  # Use existing domain
+            break
+        elif [[ $confirm_domain =~ ^[Nn] ]]; then
+            # Remove existing domain and search lines
+            sed -i '/^domain /d' /etc/resolv.conf
+            sed -i '/^search /d' /etc/resolv.conf
+            break
+        else
+            log_and_echo "Invalid input. Please enter 'y' or 'n'."
+        fi
+    done
+fi
 
-        exit 0  # Exit the script after configuring the IP
+# Write to /etc/resolv.conf
+cat <<EOF > /etc/resolv.conf
+search $DOMAIN_NAME
+$(echo "$DNS_SERVERS" | awk '{print "nameserver " $1}')
+EOF
+
+# Configure static IP (using 'ip' command and updating /etc/network/interfaces)
+ip addr flush dev "$DEFAULT_INTERFACE"
+ip addr add "$IP_ADDRESS/$NETMASK" dev "$DEFAULT_INTERFACE"
+ip route add default via "$GATEWAY"
+
+# Update /etc/network/interfaces (replace existing configuration)
+sed -i "/iface $DEFAULT_INTERFACE inet.*/c\\
+iface $DEFAULT_INTERFACE inet static\\
+    address $IP_ADDRESS\\
+    netmask $NETMASK\\
+    gateway $GATEWAY\\
+    dns-nameservers $(echo $DNS_SERVERS | sed 's/,/ /g')" /etc/network/interfaces
+
+# Inform the user about the connection loss BEFORE restarting the network
+echo "Static IP configured. You will lose connection and need to reconnect." 
+
+# Apply changes and restart networking
+systemctl restart networking.service
+
+exit 0  # Exit the script after configuring the IP
 fi
 
 log_and_echo "Finished: Checking for static IP configuration."
